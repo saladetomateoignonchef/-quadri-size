@@ -30,7 +30,7 @@ namespace QuadriSize
         private readonly TextBlock _emptyTitle, _emptyText;
         private readonly ColumnDefinition _driveUsedCol, _driveFreeCol;
         private readonly Border _driveUsedBar;
-        private readonly Button _btnScan, _btnCancel, _btnCollapse, _navBrowse;
+        private readonly Button _btnScan, _btnCancel, _btnCollapse, _navBrowse, _btnUpdate;
         private readonly CheckBox _themeSwitch;
         private readonly ProgressBar _busyBar;
         private readonly StackPanel _drivesPanel, _emptyState;
@@ -78,6 +78,7 @@ namespace QuadriSize
             _btnCancel = Find<Button>("BtnCancel");
             _btnCollapse = Find<Button>("BtnCollapse");
             _navBrowse = Find<Button>("NavBrowse");
+            _btnUpdate = Find<Button>("BtnUpdate");
             _themeSwitch = Find<CheckBox>("ThemeSwitch");
             _busyBar = Find<ProgressBar>("Busy");
             _drivesPanel = Find<StackPanel>("DrivesPanel");
@@ -98,6 +99,7 @@ namespace QuadriSize
             _btnCancel.Click += delegate { if (_scanner != null) _scanner.Cancel(); };
             _btnCollapse.Click += delegate { CollapseAll(); };
             _navBrowse.Click += delegate { Browse(); };
+            _btnUpdate.Click += delegate { UpdateApp(); };
 
             _themeSwitch.IsChecked = Theme.Current == Theme.Dark;
             _themeSwitch.Checked += delegate { ChangeTheme(Theme.Dark); };
@@ -328,6 +330,7 @@ namespace QuadriSize
             _btnCollapse.IsEnabled = !busy && _rows.Count > 0;
             _busyBar.Visibility = busy ? Visibility.Visible : Visibility.Hidden;
             _navBrowse.IsEnabled = !busy;
+            _btnUpdate.IsEnabled = !busy;
             foreach (var button in _driveButtons) button.IsEnabled = !busy;
             _tree.IsHitTestVisible = !busy;
             Window.Cursor = busy ? (scanning ? Cursors.AppStarting : Cursors.Wait) : null;
@@ -810,6 +813,86 @@ namespace QuadriSize
                         ? "« " + item.Name + " » n'existe plus."
                         : "« " + item.Name + " » actualisé · " + Format.Size(item.Size);
                     RaiseOperationCompleted();
+                });
+            });
+        }
+
+        // ---------------------------------------------------------------- Mise à jour de l'appli (bouton « maj git »)
+
+        private static string ExePath
+        {
+            get { return System.Reflection.Assembly.GetExecutingAssembly().Location; }
+        }
+
+        private void UpdateApp()
+        {
+            if (_busy) return;
+            SetBusy(true, false);
+            string previousStatus = _status.Text;
+            _status.Text = "Recherche de nouveautés sur GitHub…";
+
+            RunInBackground(() =>
+            {
+                UpdateCheck check = Updater.Check(ExePath);
+                return (Action)(() =>
+                {
+                    SetBusy(false, false);
+                    _status.Text = previousStatus;
+                    if (check.Error != null)
+                    {
+                        Dialogs.Show(Window, DialogKind.Warning, "Mise à jour impossible", check.Error,
+                            check.RepoDir == null ? "Pour pouvoir mettre l'appli à jour, récupère-la avec :\ngit clone "
+                                + "https://github.com/saladetomateoignonchef/-quadri-size.git\npuis lance build.bat." : null);
+                        return;
+                    }
+                    if (!check.HasUpdate)
+                    {
+                        Dialogs.Show(Window, DialogKind.Info, "Quadri-Size est à jour",
+                            "Tu as déjà la dernière version disponible sur GitHub.", check.RepoDir);
+                        return;
+                    }
+
+                    var list = check.NewCommits.Take(8).Select(c => "• " + c).ToList();
+                    if (check.NewCommits.Count > 8) list.Add("… et " + (check.NewCommits.Count - 8) + " autres");
+                    bool confirmed = Dialogs.Ask(Window, DialogKind.Question,
+                        check.NewCommits.Count > 1 ? check.NewCommits.Count + " nouveautés disponibles" : "Une nouveauté disponible",
+                        "Quadri-Size va télécharger les changements depuis GitHub, se recompiler puis redémarrer."
+                        + (_rows.Count > 0 ? " L'analyse affichée sera perdue." : ""),
+                        string.Join("\n", list), "Mettre à jour", "Plus tard");
+                    if (confirmed) ApplyUpdate(check);
+                });
+            });
+        }
+
+        private void ApplyUpdate(UpdateCheck check)
+        {
+            if (_scanner != null) _scanner.Cancel();
+            SetBusy(true, false);
+            _status.Text = "Mise à jour : téléchargement puis compilation… (environ 30 secondes)";
+
+            RunInBackground(() =>
+            {
+                string error = Updater.Apply(check, ExePath);
+                return (Action)(() =>
+                {
+                    SetBusy(false, false);
+                    if (error != null)
+                    {
+                        _status.Text = "La mise à jour a échoué.";
+                        Dialogs.Show(Window, DialogKind.Error, "La mise à jour a échoué", error.Split('\n')[0],
+                            string.Join("\n", error.Split('\n').Skip(1)).Trim());
+                        return;
+                    }
+                    try
+                    {
+                        Updater.StartNewVersion(ExePath);
+                        Application.Current.Shutdown();
+                    }
+                    catch (Exception ex)
+                    {
+                        Dialogs.Show(Window, DialogKind.Info, "Mise à jour terminée",
+                            "La nouvelle version est prête, mais n'a pas pu démarrer toute seule. Ferme Quadri-Size et relance-le.", ex.Message);
+                    }
                 });
             });
         }

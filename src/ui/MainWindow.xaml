@@ -65,12 +65,21 @@
 
       <!-- En-tête -->
       <Grid>
-        <StackPanel Margin="0,0,260,0">
+        <StackPanel Margin="0,0,380,0">
           <TextBlock x:Name="PageTitle" Text="Quadri-Size" FontSize="24" FontWeight="Bold" TextTrimming="CharacterEllipsis"/>
           <TextBlock x:Name="StatusText" Style="{StaticResource Muted}" Margin="0,3,0,0" TextTrimming="CharacterEllipsis"
                      Text="Choisis un lecteur à gauche pour voir ce qui prend de la place."/>
         </StackPanel>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+          <Button x:Name="BtnUpdate" Style="{StaticResource BtnBase}" Margin="0,0,8,0"
+                  ToolTip="Télécharge la dernière version depuis GitHub, recompile et redémarre Quadri-Size">
+            <StackPanel Orientation="Horizontal">
+              <Path Data="M8,1.5 L8,10.5 M4,6.8 L8,10.8 L12,6.8 M2.5,14 L13.5,14" Stroke="{DynamicResource TextBrush}" StrokeThickness="1.7"
+                    StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                    Width="16" Height="16" Stretch="None" VerticalAlignment="Center"/>
+              <TextBlock Text="maj git" Margin="8,0,0,0" VerticalAlignment="Center"/>
+            </StackPanel>
+          </Button>
           <Button x:Name="BtnCancel" Content="Annuler" Style="{StaticResource BtnBase}" Margin="0,0,8,0" Visibility="Collapsed"/>
           <Button x:Name="BtnScan" Content="Analyser" Style="{StaticResource BtnPrimary}" Margin="0,0,14,0" IsEnabled="False"/>
           <CheckBox x:Name="ThemeSwitch" Style="{StaticResource ThemeSwitch}" ToolTip="Thème clair / sombre"/>

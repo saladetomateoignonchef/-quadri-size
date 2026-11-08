@@ -34,6 +34,18 @@ ouverture. C'est ce qui lui permet de voir tous les dossiers.
    grises des fichiers. **Tout replier** revient au premier niveau.
 4. L'interrupteur soleil / lune passe du thème clair au thème sombre (le choix est retenu).
 
+### Mettre l'appli à jour : bouton « maj git »
+
+Le bouton **maj git** en haut à droite récupère la dernière version publiée sur GitHub :
+
+1. il regarde s'il y a des nouveautés (`git fetch`) et te les liste ;
+2. si tu confirmes, il les télécharge (`git pull`) ;
+3. il recompile l'appli (`build.bat`) ;
+4. il redémarre sur la nouvelle version.
+
+Si la compilation échoue, l'ancienne version est remise en place. Il faut que Quadri-Size ait
+été récupéré avec `git clone` (et que Git soit installé) : c'est le dossier git qui est mis à jour.
+
 ### Clic droit sur une ligne
 
 | Action | Raccourci | Effet |
@@ -70,5 +82,8 @@ analysé lui-même.
   dossier est remesuré et les tailles des dossiers parents sont recalculées.
 - `src/Theme.cs` gère le thème clair / sombre (retenu dans `%LOCALAPPDATA%\QuadriSize`) et la
   barre de titre bleu nuit ; `src/Dialogs.cs` les fenêtres de message.
+- `src/Updater.cs` fait la mise à jour du bouton « maj git ». Comme Windows interdit d'écraser
+  un programme en cours d'exécution, l'exécutable actuel est d'abord renommé en
+  `QuadriSize.old.exe`, supprimé au démarrage suivant.
 - `src/app.manifest` demande les droits administrateur au lancement.
 - La taille affichée est la taille réelle des fichiers, pas la place occupée sur le disque.
