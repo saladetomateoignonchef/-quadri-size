@@ -14,11 +14,13 @@ if not exist "%CSC%" (
 if not exist bin mkdir bin
 
 "%CSC%" /nologo /codepage:65001 /target:winexe /optimize+ /out:bin\QuadriSize.exe ^
-    /r:System.Windows.Forms.dll /r:System.Drawing.dll src\*.cs
+    /win32manifest:src\app.manifest ^
+    /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:Microsoft.VisualBasic.dll src\*.cs
 if errorlevel 1 exit /b 1
 
 if /i "%~1"=="test" (
-    "%CSC%" /nologo /codepage:65001 /target:exe /out:bin\ScanTest.exe src\Scanner.cs tests\ScanTest.cs || exit /b 1
+    "%CSC%" /nologo /codepage:65001 /target:exe /out:bin\ScanTest.exe ^
+        src\Scanner.cs src\Programs.cs tests\ScanTest.cs || exit /b 1
     bin\ScanTest.exe || exit /b 1
 )
 

@@ -4,8 +4,10 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Security.Principal;
 using System.Threading;
 using System.Windows.Forms;
+using Microsoft.VisualBasic.FileIO;
 
 namespace QuadriSize
 {
@@ -14,19 +16,22 @@ namespace QuadriSize
     {
         public DirNode Dir;      // non nul pour un dossier
         public FileEntry File;   // non nul pour un fichier
-        public DirNode Parent;   // dossier qui contient l'élément (nul pour la racine)
+        public DirNode Parent;   // dossier qui contient l'élément (nul pour la racine du scan)
         public string Name;
         public string FullPath;
-        public long Size;
-        public double Percent;   // part de la taille du dossier parent
 
         public bool IsDir { get { return Dir != null; } }
+        public long Size { get { return IsDir ? Dir.Size : File.Size; } }
+
+        /// <summary>Part de la taille du dossier parent.</summary>
+        public double Percent { get { return Parent == null ? 100 : Format.Percent(Size, Parent.Size); } }
     }
 
     public sealed class MainForm : Form
     {
         private const string Placeholder = "…";
         private const int MaxItemsPerFolder = 500;
+        private const string AppName = "Quadri-Size";
 
         private readonly ComboBox _pathBox = new ComboBox();
         private readonly Button _browseButton = new Button();
@@ -35,24 +40,33 @@ namespace QuadriSize
         private readonly TreeView _tree = new TreeView();
         private readonly ToolStripStatusLabel _status = new ToolStripStatusLabel();
         private readonly System.Windows.Forms.Timer _progressTimer = new System.Windows.Forms.Timer();
+
         private readonly ContextMenuStrip _menu = new ContextMenuStrip();
+        private ToolStripMenuItem _uninstallItem;
+        private ToolStripMenuItem _refreshItem;
 
         private readonly Color _dirBar = Color.FromArgb(126, 178, 236);
         private readonly Color _fileBar = Color.FromArgb(196, 202, 210);
         private readonly Color _barBack = Color.FromArgb(234, 237, 242);
         private readonly Color _barText = Color.FromArgb(30, 30, 30);
 
+        private readonly bool _isAdmin = IsRunningAsAdmin();
         private Scanner _scanner;
+        private bool _busy;
         private Stopwatch _clock;
         private int _barWidth;
         private string _textPrefix = "";
+        private List<InstalledProgram> _programs;
 
         /// <summary>Déclenché quand un scan se termine (terminé, annulé ou en erreur).</summary>
         public event EventHandler ScanCompleted;
 
+        /// <summary>Déclenché quand une suppression ou une actualisation se termine.</summary>
+        public event EventHandler OperationCompleted;
+
         public MainForm()
         {
-            Text = "Quadri-Size";
+            Text = _isAdmin ? AppName + " — administrateur" : AppName;
             Font = SystemFonts.MessageBoxFont;
             AutoScaleMode = AutoScaleMode.Font;
             StartPosition = FormStartPosition.CenterScreen;
@@ -64,6 +78,12 @@ namespace QuadriSize
 
             _progressTimer.Interval = 150;
             _progressTimer.Tick += delegate { ShowProgress(); };
+        }
+
+        private static bool IsRunningAsAdmin()
+        {
+            using (var identity = WindowsIdentity.GetCurrent())
+                return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
         }
 
         private float _dpiScale;
@@ -125,15 +145,14 @@ namespace QuadriSize
             _tree.DrawMode = TreeViewDrawMode.OwnerDrawText;
             _tree.DrawNode += OnDrawNode;
             _tree.BeforeExpand += OnBeforeExpand;
+            _tree.KeyDown += OnTreeKeyDown;
             _tree.NodeMouseClick += (s, e) =>
             {
                 if (e.Button == MouseButtons.Right) _tree.SelectedNode = e.Node;
             };
             _tree.ContextMenuStrip = _menu;
 
-            _menu.Items.Add("Ouvrir dans l'Explorateur", null, delegate { OpenInExplorer(); });
-            _menu.Items.Add("Copier le chemin", null, delegate { CopyPath(); });
-            _menu.Opening += (s, e) => { e.Cancel = SelectedItem() == null; };
+            BuildMenu();
 
             var statusBar = new StatusStrip();
             _status.Spring = true;
@@ -149,6 +168,66 @@ namespace QuadriSize
             _barWidth = Px(64);
             int spaceWidth = Math.Max(1, TextRenderer.MeasureText(" ", _tree.Font, Size.Empty, TextFormatFlags.NoPadding).Width);
             _textPrefix = new string(' ', (int)Math.Ceiling((_barWidth + Px(10)) / (double)spaceWidth));
+        }
+
+        private void BuildMenu()
+        {
+            _menu.Items.Add("Ouvrir dans l'Explorateur", null, delegate { OpenInExplorer(); });
+            _menu.Items.Add("Copier le chemin", null, delegate { CopyPath(); });
+            _refreshItem = new ToolStripMenuItem("Actualiser ce dossier", null, delegate { RefreshSelected(); })
+            {
+                ShortcutKeyDisplayString = "F5",
+            };
+            _menu.Items.Add(_refreshItem);
+            _menu.Items.Add(new ToolStripSeparator());
+
+            _uninstallItem = new ToolStripMenuItem("Désinstaller");
+            _uninstallItem.Click += delegate
+            {
+                var program = _uninstallItem.Tag as InstalledProgram;
+                if (program != null && _uninstallItem.DropDownItems.Count == 0) Uninstall(program);
+            };
+            _menu.Items.Add(_uninstallItem);
+
+            _menu.Items.Add(new ToolStripMenuItem("Mettre à la corbeille", null, delegate { DeleteSelected(false); })
+            {
+                ShortcutKeyDisplayString = "Suppr",
+            });
+            _menu.Items.Add(new ToolStripMenuItem("Supprimer définitivement…", null, delegate { DeleteSelected(true); })
+            {
+                ShortcutKeyDisplayString = "Maj+Suppr",
+            });
+
+            _menu.Opening += (s, e) =>
+            {
+                var item = SelectedItem();
+                if (item == null || _busy) { e.Cancel = true; return; }
+                _refreshItem.Visible = item.IsDir;
+                SetupUninstallItem(item);
+            };
+        }
+
+        private void SetupUninstallItem(ItemInfo item)
+        {
+            _uninstallItem.DropDownItems.Clear();
+            _uninstallItem.Tag = null;
+            var programs = item.IsDir ? ProgramsFor(item.FullPath) : new List<InstalledProgram>();
+            _uninstallItem.Visible = programs.Count > 0;
+
+            if (programs.Count == 1)
+            {
+                _uninstallItem.Text = "Désinstaller « " + programs[0].Name + " »…";
+                _uninstallItem.Tag = programs[0];
+            }
+            else
+            {
+                _uninstallItem.Text = "Désinstaller";
+                foreach (var program in programs)
+                {
+                    var p = program;
+                    _uninstallItem.DropDownItems.Add(p.Name + "…", null, delegate { Uninstall(p); });
+                }
+            }
         }
 
         private void SetupButton(Button button, string text)
@@ -207,47 +286,60 @@ namespace QuadriSize
             }
         }
 
+        private void SetBusy(bool busy, bool scanning)
+        {
+            _busy = busy;
+            _scanButton.Enabled = !busy;
+            _browseButton.Enabled = !busy;
+            _pathBox.Enabled = !busy;
+            _cancelButton.Enabled = busy && scanning;
+            UseWaitCursor = busy;
+            if (busy && scanning) _progressTimer.Start(); else _progressTimer.Stop();
+        }
+
         // ---------------------------------------------------------------- Scan
 
         public void StartScan(string path)
         {
-            if (_scanner != null) return;
+            if (_busy) return;
             if (string.IsNullOrEmpty(path) || !Directory.Exists(path))
             {
-                MessageBox.Show(this, "Ce dossier n'existe pas :\n" + path, "Quadri-Size",
+                MessageBox.Show(this, "Ce dossier n'existe pas :\n" + path, AppName,
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
             _tree.Nodes.Clear();
+            _programs = null;
             GC.Collect(); // libère le résultat du scan précédent avant d'en lancer un autre
 
             var scanner = new Scanner();
             _scanner = scanner;
             _clock = Stopwatch.StartNew();
-            SetScanning(true);
+            SetBusy(true, true);
 
-            var worker = new Thread(() =>
+            RunInBackground(() =>
             {
                 DirNode root = null;
                 Exception error = null;
                 try { root = scanner.Scan(path); }
                 catch (Exception ex) { error = ex; }
-                try { BeginInvoke((Action)(() => OnScanFinished(scanner, root, error))); }
-                catch (InvalidOperationException) { } // fenêtre déjà fermée
-            }, 64 * 1024 * 1024); // grosse pile : les arborescences peuvent être très profondes
-            worker.IsBackground = true;
-            worker.Start();
+                return (Action)(() => OnScanFinished(scanner, root, error));
+            });
         }
 
-        private void SetScanning(bool scanning)
+        /// <summary>Lance un travail dans un thread séparé puis exécute son résultat dans la fenêtre.</summary>
+        private void RunInBackground(Func<Action> work)
         {
-            _scanButton.Enabled = !scanning;
-            _browseButton.Enabled = !scanning;
-            _pathBox.Enabled = !scanning;
-            _cancelButton.Enabled = scanning;
-            UseWaitCursor = scanning;
-            if (scanning) _progressTimer.Start(); else _progressTimer.Stop();
+            var worker = new Thread(() =>
+            {
+                Action done = work();
+                try { BeginInvoke(done); }
+                catch (InvalidOperationException) { } // fenêtre déjà fermée
+            }, 64 * 1024 * 1024); // grosse pile : les arborescences peuvent être très profondes
+            worker.SetApartmentState(ApartmentState.STA); // nécessaire aux boîtes de dialogue de Windows
+            worker.IsBackground = true;
+            worker.Start();
         }
 
         private void ShowProgress()
@@ -261,7 +353,7 @@ namespace QuadriSize
         {
             _scanner = null;
             _clock.Stop();
-            SetScanning(false);
+            SetBusy(false, false);
 
             if (error != null)
             {
@@ -269,21 +361,19 @@ namespace QuadriSize
             }
             else if (root != null)
             {
-                var item = new ItemInfo
-                {
-                    Dir = root, Name = root.FullPath, FullPath = root.FullPath,
-                    Size = root.Size, Percent = 100,
-                };
+                var item = new ItemInfo { Dir = root, Name = root.FullPath, FullPath = root.FullPath };
                 var node = MakeTreeNode(item);
                 _tree.Nodes.Add(node);
                 node.Expand();
                 _tree.SelectedNode = node;
                 _tree.Focus();
 
-                string summary = Format.Size(root.Size) + " — " + root.FileCount.ToString("N0") + " fichiers, "
-                    + root.DirCount.ToString("N0") + " dossiers — " + (_clock.ElapsedMilliseconds / 1000.0).ToString("0.0") + " s";
+                string summary = Summary(root) + " — " + (_clock.ElapsedMilliseconds / 1000.0).ToString("0.0") + " s";
                 if (scanner.DeniedCount > 0)
-                    summary += " — " + scanner.DeniedCount.ToString("N0") + " dossiers inaccessibles (lance en administrateur pour tout voir)";
+                {
+                    summary += " — " + Format.Count(scanner.DeniedCount, "dossier") + " inaccessible" + (scanner.DeniedCount > 1 ? "s" : "");
+                    if (!_isAdmin) summary += " (lance en administrateur pour tout voir)";
+                }
                 if (scanner.Cancelled)
                     summary = "Analyse annulée, résultats partiels : " + summary;
                 _status.Text = summary;
@@ -291,6 +381,12 @@ namespace QuadriSize
 
             var handler = ScanCompleted;
             if (handler != null) handler(this, EventArgs.Empty);
+        }
+
+        private static string Summary(DirNode root)
+        {
+            return Format.Size(root.Size) + " — " + Format.Count(root.FileCount, "fichier") + ", "
+                + Format.Count(root.DirCount, "dossier");
         }
 
         // ---------------------------------------------------------------- Arbre
@@ -307,8 +403,7 @@ namespace QuadriSize
             string text = Format.Size(item.Size) + "    " + item.Name;
             if (item.IsDir)
             {
-                long count = item.Dir.FileCount;
-                text += "    (" + count.ToString("N0") + (count > 1 ? " fichiers)" : " fichier)");
+                text += "    (" + Format.Count(item.Dir.FileCount, "fichier") + ")";
                 if (item.Dir.Denied) text += " — accès refusé";
             }
             return text;
@@ -323,17 +418,9 @@ namespace QuadriSize
             DirNode dir = item.Dir;
             var children = new List<ItemInfo>(dir.Dirs.Count + dir.Files.Count);
             foreach (var d in dir.Dirs)
-                children.Add(new ItemInfo
-                {
-                    Dir = d, Parent = dir, Name = d.Name, FullPath = d.FullPath,
-                    Size = d.Size, Percent = Format.Percent(d.Size, dir.Size),
-                });
+                children.Add(new ItemInfo { Dir = d, Parent = dir, Name = d.Name, FullPath = d.FullPath });
             foreach (var f in dir.Files)
-                children.Add(new ItemInfo
-                {
-                    File = f, Parent = dir, Name = f.Name, FullPath = Path.Combine(dir.FullPath, f.Name),
-                    Size = f.Size, Percent = Format.Percent(f.Size, dir.Size),
-                });
+                children.Add(new ItemInfo { File = f, Parent = dir, Name = f.Name, FullPath = Path.Combine(dir.FullPath, f.Name) });
 
             // Les plus gros en premier ; à taille égale, les dossiers avant les fichiers puis par nom.
             var sorted = children
@@ -366,6 +453,30 @@ namespace QuadriSize
             }
         }
 
+        /// <summary>Remet à jour tailles et pourcentages affichés, de <paramref name="start"/> jusqu'à la racine.</summary>
+        private void RefreshTexts(TreeNode start)
+        {
+            _tree.BeginUpdate();
+            try
+            {
+                for (var node = start; node != null; node = node.Parent)
+                {
+                    UpdateText(node);
+                    foreach (TreeNode child in node.Nodes) UpdateText(child);
+                }
+            }
+            finally
+            {
+                _tree.EndUpdate();
+            }
+        }
+
+        private void UpdateText(TreeNode node)
+        {
+            var item = node.Tag as ItemInfo;
+            if (item != null) node.Text = _textPrefix + DescribeItem(item);
+        }
+
         private void OnDrawNode(object sender, DrawTreeNodeEventArgs e)
         {
             var item = e.Node.Tag as ItemInfo;
@@ -386,18 +497,17 @@ namespace QuadriSize
                 g.FillRectangle(brush, b.X, b.Y, Math.Max(b.Width, _tree.ClientSize.Width - b.X), b.Height);
 
             // Barre de pourcentage
+            double percent = item.Percent;
             int pad = Math.Max(2, b.Height / 6);
             var bar = new Rectangle(b.X + 2, b.Y + pad, _barWidth, b.Height - 2 * pad);
             using (var brush = new SolidBrush(_barBack))
                 g.FillRectangle(brush, bar);
-            int filled = (int)Math.Round(bar.Width * Math.Min(100, item.Percent) / 100.0);
+            int filled = (int)Math.Round(bar.Width * Math.Min(100, percent) / 100.0);
             if (filled > 0)
                 using (var brush = new SolidBrush(item.IsDir ? _dirBar : _fileBar))
                     g.FillRectangle(brush, bar.X, bar.Y, filled, bar.Height);
-
-            string pct = Format.PercentText(item.Percent);
-            var pctFlags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding;
-            TextRenderer.DrawText(g, pct, _tree.Font, bar, _barText, pctFlags);
+            TextRenderer.DrawText(g, Format.PercentText(percent), _tree.Font, bar, _barText,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
 
             // Taille et nom
             var textRect = new Rectangle(bar.Right + 8, b.Y, Math.Max(0, _tree.ClientSize.Width - bar.Right - 8), b.Height);
@@ -405,7 +515,22 @@ namespace QuadriSize
                 TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
         }
 
-        // ---------------------------------------------------------------- Menu contextuel
+        private void OnTreeKeyDown(object sender, KeyEventArgs e)
+        {
+            if (_busy) return;
+            if (e.KeyCode == Keys.Delete)
+            {
+                e.Handled = true;
+                DeleteSelected(e.Shift);
+            }
+            else if (e.KeyCode == Keys.F5)
+            {
+                e.Handled = true;
+                RefreshSelected();
+            }
+        }
+
+        // ---------------------------------------------------------------- Actions simples
 
         private ItemInfo SelectedItem()
         {
@@ -423,7 +548,7 @@ namespace QuadriSize
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, ex.Message, "Quadri-Size", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                ShowError(ex.Message);
             }
         }
 
@@ -431,6 +556,244 @@ namespace QuadriSize
         {
             var item = SelectedItem();
             if (item != null) Clipboard.SetText(item.FullPath);
+        }
+
+        private void ShowError(string message)
+        {
+            MessageBox.Show(this, message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+
+        // ---------------------------------------------------------------- Suppression
+
+        /// <summary>Raison pour laquelle on refuse de supprimer cet élément, ou nul si c'est permis.</summary>
+        private static string ProtectionReason(ItemInfo item)
+        {
+            if (item.Parent == null)
+                return "Impossible de supprimer le dossier analysé lui-même.\n\n"
+                    + "Analyse le dossier qui le contient si tu veux vraiment le supprimer.";
+
+            string path = InstalledPrograms.Normalize(item.FullPath) ?? item.FullPath;
+            string windows = InstalledPrograms.Normalize(Environment.GetFolderPath(Environment.SpecialFolder.Windows));
+            if (windows != null && (InstalledPrograms.SamePath(path, windows) || InstalledPrograms.IsInside(path, windows)))
+                return "Les fichiers de Windows sont protégés : les supprimer peut empêcher l'ordinateur de démarrer.\n\n"
+                    + "Pour libérer de la place dans Windows, utilise plutôt « Nettoyage de disque » (cleanmgr).";
+
+            string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var systemFolders = new List<string>
+            {
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                profile,
+                Path.GetDirectoryName(profile),
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            };
+            if (systemFolders.Any(f => !string.IsNullOrEmpty(f) && InstalledPrograms.SamePath(path, InstalledPrograms.Normalize(f))))
+                return "Ce dossier fait partie de Windows et ne peut pas être supprimé.\n\n"
+                    + "Tu peux en revanche supprimer ce qu'il contient.";
+
+            // Éléments système à la racine d'un lecteur (fichier d'échange, corbeille, démarrage…).
+            string parent = Path.GetDirectoryName(path);
+            if (parent != null && parent.Length <= 3)
+            {
+                var rootItems = new[] { "System Volume Information", "Recovery", "Boot", "EFI", "bootmgr", "BOOTNXT",
+                    "pagefile.sys", "hiberfil.sys", "swapfile.sys", "DumpStack.log", "DumpStack.log.tmp" };
+                if (item.Name.StartsWith("$") || rootItems.Any(n => string.Equals(n, item.Name, StringComparison.OrdinalIgnoreCase)))
+                    return "« " + item.Name + " » est un élément système de Windows : il ne peut pas être supprimé ici.";
+            }
+            return null;
+        }
+
+        private void DeleteSelected(bool permanent)
+        {
+            var node = _tree.SelectedNode;
+            var item = node == null ? null : node.Tag as ItemInfo;
+            if (item == null || _busy) return;
+
+            string refusal = ProtectionReason(item);
+            if (refusal != null)
+            {
+                MessageBox.Show(this, refusal, AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string message = (permanent ? "Supprimer définitivement " : "Mettre à la corbeille ")
+                + (item.IsDir ? "le dossier" : "le fichier") + " « " + item.Name + " » ?\n\n"
+                + item.FullPath + "\nTaille : " + Format.Size(item.Size);
+            if (item.IsDir) message += " (" + Format.Count(item.Dir.FileCount, "fichier") + ")";
+
+            var programs = item.IsDir ? ProgramsFor(item.FullPath) : new List<InstalledProgram>();
+            if (programs.Count > 0)
+                message += "\n\nAttention : ce dossier contient le programme « " + programs[0].Name + " ».\n"
+                    + "Pour l'enlever proprement, utilise plutôt clic droit → Désinstaller.";
+            if (permanent) message += "\n\nCette action est irréversible.";
+
+            var answer = MessageBox.Show(this, message, AppName, MessageBoxButtons.YesNo,
+                permanent || programs.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2);
+            if (answer == DialogResult.Yes) DeleteItem(node, permanent);
+        }
+
+        /// <summary>Supprime l'élément sans demander de confirmation (déjà faite), puis met l'arbre à jour.</summary>
+        private void DeleteItem(TreeNode node, bool permanent)
+        {
+            var item = (ItemInfo)node.Tag;
+            SetBusy(true, false);
+            _status.Text = (permanent ? "Suppression de " : "Mise à la corbeille de ") + item.FullPath + "…";
+            var recycle = permanent ? RecycleOption.DeletePermanently : RecycleOption.SendToRecycleBin;
+
+            RunInBackground(() =>
+            {
+                string error = null;
+                try
+                {
+                    // Les fenêtres d'erreur de Windows (fichier ouvert, etc.) s'affichent si besoin.
+                    if (item.IsDir) FileSystem.DeleteDirectory(item.FullPath, UIOption.OnlyErrorDialogs, recycle);
+                    else FileSystem.DeleteFile(item.FullPath, UIOption.OnlyErrorDialogs, recycle);
+                }
+                catch (OperationCanceledException) { error = "Suppression annulée."; }
+                catch (Exception ex) { error = ex.Message; }
+
+                // Une suppression peut être partielle (fichier ouvert…) : on remesure ce qui reste.
+                DirNode remaining = Rescan(item);
+                return (Action)(() =>
+                {
+                    long before = item.Size;
+                    bool gone = ApplyRescan(node, item, remaining);
+                    SetBusy(false, false);
+
+                    if (gone)
+                        _status.Text = "« " + item.Name + " » " + (permanent ? "supprimé définitivement" : "mis à la corbeille")
+                            + " (" + Format.Size(before) + ")" + (permanent ? "" : " — vide la corbeille pour libérer la place")
+                            + ". Total : " + Summary(RootDir());
+                    else
+                    {
+                        long freed = before - item.Size;
+                        _status.Text = "Suppression incomplète de « " + item.Name + " » : " + Format.Size(freed) + " libérés, "
+                            + Format.Size(item.Size) + " restants.";
+                        if (error != null && error != "Suppression annulée.")
+                            ShowError("Une partie de « " + item.Name + " » n'a pas pu être supprimée :\n\n" + error);
+                    }
+                    RaiseOperationCompleted();
+                });
+            });
+        }
+
+        /// <summary>Remesure un élément sur le disque (appelé hors de la fenêtre). Nul si le dossier n'existe plus.</summary>
+        private static DirNode Rescan(ItemInfo item)
+        {
+            if (!item.IsDir || !Directory.Exists(item.FullPath)) return null;
+            try { return new Scanner().Scan(item.FullPath, item.Parent); }
+            catch (Exception) { return null; }
+        }
+
+        /// <summary>
+        /// Met le modèle et l'arbre en accord avec le disque après une suppression ou une actualisation.
+        /// Renvoie vrai si l'élément n'existe plus.
+        /// </summary>
+        private bool ApplyRescan(TreeNode node, ItemInfo item, DirNode rescanned)
+        {
+            TreeNode parentNode = node.Parent;
+            bool exists = item.IsDir ? Directory.Exists(item.FullPath) : System.IO.File.Exists(item.FullPath);
+
+            if (!exists)
+            {
+                if (item.IsDir) item.Parent.RemoveDir(item.Dir);
+                else item.Parent.RemoveFile(item.File);
+                node.Remove();
+                if (parentNode != null) _tree.SelectedNode = parentNode;
+            }
+            else if (item.IsDir && rescanned != null)
+            {
+                item.Parent.ReplaceDir(item.Dir, rescanned);
+                item.Dir = rescanned;
+
+                bool expanded = node.IsExpanded;
+                node.Collapse();
+                node.Nodes.Clear();
+                if (rescanned.HasChildren) node.Nodes.Add(new TreeNode(Placeholder));
+                if (expanded) node.Expand();
+                _tree.SelectedNode = node;
+            }
+
+            RefreshTexts(exists ? node : parentNode);
+            return !exists;
+        }
+
+        private DirNode RootDir()
+        {
+            var item = _tree.Nodes.Count > 0 ? _tree.Nodes[0].Tag as ItemInfo : null;
+            return item == null ? null : item.Dir;
+        }
+
+        private void RaiseOperationCompleted()
+        {
+            var handler = OperationCompleted;
+            if (handler != null) handler(this, EventArgs.Empty);
+        }
+
+        // ---------------------------------------------------------------- Actualisation
+
+        private void RefreshSelected()
+        {
+            var node = _tree.SelectedNode;
+            var item = node == null ? null : node.Tag as ItemInfo;
+            if (item == null || !item.IsDir || _busy) return;
+
+            if (item.Parent == null)
+            {
+                StartScan(item.FullPath); // la racine : on relance l'analyse complète
+                return;
+            }
+
+            SetBusy(true, false);
+            _status.Text = "Actualisation de " + item.FullPath + "…";
+            RunInBackground(() =>
+            {
+                DirNode rescanned = Rescan(item);
+                return (Action)(() =>
+                {
+                    bool gone = ApplyRescan(node, item, rescanned);
+                    SetBusy(false, false);
+                    _status.Text = gone
+                        ? "« " + item.Name + " » n'existe plus. Total : " + Summary(RootDir())
+                        : "« " + item.Name + " » actualisé : " + Format.Size(item.Size) + ". Total : " + Summary(RootDir());
+                    RaiseOperationCompleted();
+                });
+            });
+        }
+
+        // ---------------------------------------------------------------- Désinstallation
+
+        private List<InstalledProgram> ProgramsFor(string folder)
+        {
+            if (_programs == null) _programs = InstalledPrograms.Load();
+            return InstalledPrograms.FindFor(_programs, folder);
+        }
+
+        private void Uninstall(InstalledProgram program)
+        {
+            var answer = MessageBox.Show(this,
+                "Lancer le désinstalleur de « " + program.Name + " » ?\n\n"
+                + "C'est la même chose que de le désinstaller depuis les Paramètres de Windows.",
+                AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
+            if (answer != DialogResult.Yes) return;
+
+            try
+            {
+                string file, arguments;
+                InstalledPrograms.SplitCommand(program.UninstallCommand, out file, out arguments);
+                Process.Start(new ProcessStartInfo(file, arguments) { UseShellExecute = true });
+                _programs = null; // la liste aura changé une fois la désinstallation finie
+                _status.Text = "Désinstalleur de « " + program.Name + " » lancé. Quand il a fini, "
+                    + "fais clic droit → Actualiser ce dossier (F5) pour mettre l'arbre à jour.";
+            }
+            catch (Exception ex)
+            {
+                ShowError("Impossible de lancer le désinstalleur de « " + program.Name + " » :\n\n" + ex.Message
+                    + "\n\nTu peux le désinstaller depuis Paramètres → Applications → Applications installées.");
+            }
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)

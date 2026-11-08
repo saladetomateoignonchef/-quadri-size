@@ -48,6 +48,40 @@ namespace QuadriSize
         {
             get { return Dirs.Count > 0 || Files.Count > 0; }
         }
+
+        /// <summary>Retire un sous-dossier (supprimé du disque) et met à jour les totaux des dossiers parents.</summary>
+        public void RemoveDir(DirNode child)
+        {
+            if (Dirs.Remove(child))
+                AddToTotals(-child.Size, -child.FileCount, -(1 + child.DirCount));
+        }
+
+        /// <summary>Retire un fichier (supprimé du disque) et met à jour les totaux des dossiers parents.</summary>
+        public void RemoveFile(FileEntry file)
+        {
+            if (Files.Remove(file))
+                AddToTotals(-file.Size, -1, 0);
+        }
+
+        /// <summary>Remplace un sous-dossier par une version rescannée et met à jour les totaux.</summary>
+        public void ReplaceDir(DirNode oldChild, DirNode newChild)
+        {
+            int index = Dirs.IndexOf(oldChild);
+            if (index < 0) return;
+            Dirs[index] = newChild;
+            AddToTotals(newChild.Size - oldChild.Size, newChild.FileCount - oldChild.FileCount,
+                newChild.DirCount - oldChild.DirCount);
+        }
+
+        private void AddToTotals(long size, long files, long dirs)
+        {
+            for (var node = this; node != null; node = node.Parent)
+            {
+                node.Size += size;
+                node.FileCount += files;
+                node.DirCount += dirs;
+            }
+        }
     }
 
     /// <summary>
@@ -74,9 +108,15 @@ namespace QuadriSize
 
         public DirNode Scan(string rootPath)
         {
-            var root = new DirectoryInfo(rootPath);
-            var node = new DirNode(DisplayName(root), root.FullName, null);
-            ScanInto(root, node);
+            return Scan(rootPath, null);
+        }
+
+        /// <summary>Scanne un dossier ; <paramref name="parent"/> sert quand on rescanne un sous-dossier.</summary>
+        public DirNode Scan(string path, DirNode parent)
+        {
+            var dir = new DirectoryInfo(path);
+            var node = new DirNode(parent == null ? DisplayName(dir) : dir.Name, dir.FullName, parent);
+            ScanInto(dir, node);
             return node;
         }
 
@@ -155,6 +195,12 @@ namespace QuadriSize
             }
             string pattern = value >= 100 ? "0" : value >= 10 ? "0.0" : "0.00";
             return value.ToString(pattern) + " " + Units[unit];
+        }
+
+        /// <summary>« 1 fichier », « 3 fichiers »…</summary>
+        public static string Count(long count, string word)
+        {
+            return count.ToString("N0") + " " + word + (count > 1 ? "s" : "");
         }
 
         public static double Percent(long part, long whole)

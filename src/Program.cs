@@ -1,20 +1,15 @@
 using System;
-using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace QuadriSize
 {
     public static class Program
     {
-        [DllImport("user32.dll")]
-        private static extern bool SetProcessDPIAware();
-
         [STAThread]
         public static void Main()
         {
-            // Texte net sur les écrans à haute résolution (sinon Windows étire une image floue).
-            if (Environment.OSVersion.Version.Major >= 6) SetProcessDPIAware();
-
+            // Les droits administrateur et la netteté à haute résolution sont demandés
+            // dans app.manifest, intégré à l'exécutable par build.bat.
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new MainForm());

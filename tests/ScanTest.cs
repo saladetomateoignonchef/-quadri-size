@@ -46,6 +46,43 @@ namespace QuadriSize.Tests
                 Check("format 1,5 Ko", Format.Size(1536), (1.5).ToString("0.00") + " Ko");
                 Check("format 2 Go", Format.Size(2L * 1024 * 1024 * 1024), (2.0).ToString("0.00") + " Go");
                 Check("% sur un total nul", Format.Percent(10, 0), 0.0);
+
+                // Après une suppression, les totaux de tous les parents suivent.
+                DirNode sous = gros.Dirs.Single();
+                gros.RemoveDir(sous);
+                Check("gros après retrait de sous", gros.Size, 6000L);
+                Check("total après retrait de sous", node.Size, 8000L);
+                Check("fichiers après retrait de sous", node.FileCount, 3L);
+                Check("dossiers après retrait de sous", node.DirCount, 3L);
+
+                node.RemoveFile(node.Files.Single());
+                Check("total après retrait du fichier racine", node.Size, 7500L);
+                Check("fichiers après retrait du fichier racine", node.FileCount, 2L);
+
+                // Rescan d'un dossier qui a changé sur le disque.
+                File.Delete(Path.Combine(root, @"gros\a.bin"));
+                Write(root, @"gros\nouveau.bin", 100);
+                DirNode grosRescanne = scanner.Scan(Path.Combine(root, "gros"), node);
+                node.ReplaceDir(gros, grosRescanne);
+                Check("gros rescanné", grosRescanne.Size, 2100L); // nouveau.bin + sous/b.bin toujours sur le disque
+                Check("total après rescan", node.Size, 3600L);
+                Check("dossiers après rescan", node.DirCount, 4L);
+
+                CheckSplit("\"C:\\Program Files\\App\\unins000.exe\" /SILENT", @"C:\Program Files\App\unins000.exe", "/SILENT");
+                CheckSplit("MsiExec.exe /X{1234-ABCD}", "MsiExec.exe", "/X{1234-ABCD}");
+                CheckSplit(@"C:\Program Files\App\uninstall.exe --remove", @"C:\Program Files\App\uninstall.exe", "--remove");
+                CheckSplit(@"C:\App\setup.exe", @"C:\App\setup.exe", "");
+
+                var programs = new[]
+                {
+                    new InstalledProgram { Name = "VLC", InstallLocation = @"C:\Program Files\VideoLAN\VLC" },
+                    new InstalledProgram { Name = "Photoshop", InstallLocation = @"C:\Program Files\Adobe\Photoshop" },
+                    new InstalledProgram { Name = "Acrobat", InstallLocation = @"C:\Program Files\Adobe\Acrobat" },
+                };
+                Check("programme : son dossier", Names(programs, @"C:\Program Files\VideoLAN\VLC\"), "VLC");
+                Check("programme : un sous-dossier", Names(programs, @"C:\Program Files\VideoLAN\VLC\plugins"), "VLC");
+                Check("programme : dossier parent", Names(programs, @"C:\Program Files\Adobe"), "Photoshop,Acrobat");
+                Check("programme : nom proche", Names(programs, @"C:\Program Files\VideoLAN\VLC2"), "");
             }
             finally
             {
@@ -61,6 +98,18 @@ namespace QuadriSize.Tests
             string path = Path.Combine(root, relative);
             Directory.CreateDirectory(Path.GetDirectoryName(path));
             File.WriteAllBytes(path, new byte[size]);
+        }
+
+        private static void CheckSplit(string command, string expectedFile, string expectedArgs)
+        {
+            string file, args;
+            InstalledPrograms.SplitCommand(command, out file, out args);
+            Check("commande " + command, file + " | " + args, expectedFile + " | " + expectedArgs);
+        }
+
+        private static string Names(InstalledProgram[] programs, string folder)
+        {
+            return string.Join(",", InstalledPrograms.FindFor(programs, folder).Select(p => p.Name));
         }
 
         private static void Check<T>(string name, T actual, T expected)
