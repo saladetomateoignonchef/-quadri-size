@@ -24,17 +24,21 @@ build.bat test
 Quadri-Size se lance toujours **en administrateur** : Windows demande l'autorisation à chaque
 ouverture. C'est ce qui lui permet de voir tous les dossiers.
 
-1. Choisis un lecteur dans la liste, ou un dossier avec **Parcourir…** (tu peux aussi taper
-   un chemin puis appuyer sur Entrée).
-2. Clique sur **Analyser**. Tu peux arrêter un scan avec **Annuler** : les résultats partiels
-   restent affichés.
-3. Déplie les dossiers avec **+**. Ils sont triés du plus gros au plus petit. Les barres bleues
-   sont des dossiers, les grises des fichiers.
+1. Clique sur un lecteur dans le menu de gauche, ou sur **Choisir un dossier…**. L'analyse
+   démarre tout de suite ; **Annuler** l'arrête en gardant les résultats partiels, **Analyser**
+   la relance.
+2. Les cartes du haut donnent la taille analysée, le nombre de fichiers et de dossiers, et
+   l'espace libre du lecteur.
+3. Déplie les dossiers avec la flèche, un double-clic ou les flèches du clavier (→ / ←).
+   Ils sont triés du plus gros au plus petit. Les barres turquoise sont des dossiers, les
+   grises des fichiers. **Tout replier** revient au premier niveau.
+4. L'interrupteur soleil / lune passe du thème clair au thème sombre (le choix est retenu).
 
 ### Clic droit sur une ligne
 
 | Action | Raccourci | Effet |
 |---|---|---|
+| Déplier / replier | Entrée | |
 | Ouvrir dans l'Explorateur | | Ouvre le dossier, ou sélectionne le fichier |
 | Copier le chemin | | |
 | Actualiser ce dossier | F5 | Remesure le dossier (après une désinstallation par exemple) |
@@ -57,8 +61,14 @@ analysé lui-même.
   mêmes fichiers.
 - `src/Programs.cs` lit la liste des programmes installés dans le registre (la même que
   « Applications installées » dans les Paramètres).
-- `src/MainForm.cs` affiche l'arbre. Les sous-éléments d'un dossier ne sont créés qu'au moment
-  où on le déplie (500 au maximum, le reste est résumé sur une ligne). Après une suppression,
-  le dossier est remesuré et les tailles des dossiers parents sont recalculées.
+- L'interface est en WPF, avec la même charte graphique que Driver : `src/ui/Theme.xaml`
+  (couleurs et styles), `src/ui/MainWindow.xaml` (fenêtre) et `src/ui/Dialog.xaml` (messages).
+  Ces fichiers sont intégrés à l'exécutable par `build.bat`.
+- `src/MainUi.cs` fait vivre la fenêtre. L'arbre est un tableau « à plat » (`src/Rows.cs`) :
+  déplier un dossier insère ses enfants dessous, avec un retrait, pour garder les colonnes
+  alignées (500 au maximum, le reste est résumé sur une ligne). Après une suppression, le
+  dossier est remesuré et les tailles des dossiers parents sont recalculées.
+- `src/Theme.cs` gère le thème clair / sombre (retenu dans `%LOCALAPPDATA%\QuadriSize`) et la
+  barre de titre bleu nuit ; `src/Dialogs.cs` les fenêtres de message.
 - `src/app.manifest` demande les droits administrateur au lancement.
 - La taille affichée est la taille réelle des fichiers, pas la place occupée sur le disque.

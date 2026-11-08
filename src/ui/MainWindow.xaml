@@ -1,0 +1,225 @@
+<!-- Fenêtre principale de Quadri-Size. Les styles viennent de Theme.xaml ; le code est dans MainUi.cs. -->
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Quadri-Size" Width="1200" Height="800" MinWidth="980" MinHeight="640"
+        WindowStartupLocation="CenterScreen" Background="{DynamicResource BgBrush}"
+        FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="13" Foreground="{DynamicResource TextBrush}"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+
+  <Grid x:Name="RootGrid" Background="{DynamicResource BgBrush}">
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="240"/>
+      <ColumnDefinition Width="*"/>
+    </Grid.ColumnDefinitions>
+
+    <!-- ================= Menu de gauche ================= -->
+    <Border Background="#12263A">
+      <DockPanel Margin="14,20,14,16" LastChildFill="False">
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="8,0,0,24">
+          <!-- Logo : quatre blocs de tailles différentes, comme une carte de l'espace disque -->
+          <Viewbox Width="32" Height="32">
+            <Canvas Width="256" Height="256">
+              <Rectangle Canvas.Left="8" Canvas.Top="8" Width="240" Height="240" RadiusX="56" RadiusY="56" Fill="#0B1A29" Stroke="#2DD4BF" StrokeThickness="6"/>
+              <Rectangle Canvas.Left="56" Canvas.Top="56" Width="84" Height="144" RadiusX="12" RadiusY="12" Fill="#2DD4BF"/>
+              <Rectangle Canvas.Left="150" Canvas.Top="56" Width="50" Height="70" RadiusX="12" RadiusY="12" Fill="White"/>
+              <Rectangle Canvas.Left="150" Canvas.Top="136" Width="50" Height="30" RadiusX="9" RadiusY="9" Fill="#99F6E4"/>
+              <Rectangle Canvas.Left="150" Canvas.Top="174" Width="50" Height="26" RadiusX="9" RadiusY="9" Fill="#5EEAD4"/>
+            </Canvas>
+          </Viewbox>
+          <TextBlock Text="Quadri-Size" Foreground="White" FontSize="20" FontWeight="Bold" Margin="11,0,0,0" VerticalAlignment="Center"/>
+        </StackPanel>
+
+        <TextBlock DockPanel.Dock="Top" Text="LECTEURS" Foreground="#6F8AA3" FontSize="11" FontWeight="SemiBold" Margin="12,0,0,8"/>
+        <StackPanel x:Name="DrivesPanel" DockPanel.Dock="Top"/>
+
+        <Border DockPanel.Dock="Top" Height="1" Background="#21405C" Margin="10,10,10,12"/>
+        <Button x:Name="NavBrowse" DockPanel.Dock="Top" Style="{StaticResource Nav}">
+          <StackPanel Orientation="Horizontal">
+            <Path Data="M1.5,3.5 C1.5,2.7 2.2,2 3,2 L6.2,2 L7.7,3.5 L13,3.5 C13.8,3.5 14.5,4.2 14.5,5 L14.5,12 C14.5,12.8 13.8,13.5 13,13.5 L3,13.5 C2.2,13.5 1.5,12.8 1.5,12 Z"
+                  Stroke="#B8C7D6" StrokeThickness="1.4" Width="16" Height="16" Stretch="None" VerticalAlignment="Center"/>
+            <TextBlock Text="Choisir un dossier…" Margin="10,0,0,0" VerticalAlignment="Center"/>
+          </StackPanel>
+        </Button>
+
+        <Border DockPanel.Dock="Bottom" Background="#1A3249" CornerRadius="10" Padding="14,12">
+          <StackPanel>
+            <TextBlock x:Name="PcName" Foreground="White" FontWeight="SemiBold" FontSize="13"/>
+            <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
+              <Ellipse x:Name="AdminDot" Width="8" Height="8" Fill="#4ADE80" VerticalAlignment="Center"/>
+              <TextBlock x:Name="AdminText" Foreground="#B8C7D6" FontSize="12" Margin="7,0,0,0" VerticalAlignment="Center"/>
+            </StackPanel>
+            <TextBlock x:Name="PcInfo" Foreground="#B8C7D6" FontSize="12" Margin="0,3,0,0"/>
+          </StackPanel>
+        </Border>
+      </DockPanel>
+    </Border>
+
+    <!-- ================= Contenu ================= -->
+    <Grid Grid.Column="1" Margin="28,20,28,22">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="*"/>
+      </Grid.RowDefinitions>
+
+      <!-- En-tête -->
+      <Grid>
+        <StackPanel Margin="0,0,260,0">
+          <TextBlock x:Name="PageTitle" Text="Quadri-Size" FontSize="24" FontWeight="Bold" TextTrimming="CharacterEllipsis"/>
+          <TextBlock x:Name="StatusText" Style="{StaticResource Muted}" Margin="0,3,0,0" TextTrimming="CharacterEllipsis"
+                     Text="Choisis un lecteur à gauche pour voir ce qui prend de la place."/>
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+          <Button x:Name="BtnCancel" Content="Annuler" Style="{StaticResource BtnBase}" Margin="0,0,8,0" Visibility="Collapsed"/>
+          <Button x:Name="BtnScan" Content="Analyser" Style="{StaticResource BtnPrimary}" Margin="0,0,14,0" IsEnabled="False"/>
+          <CheckBox x:Name="ThemeSwitch" Style="{StaticResource ThemeSwitch}" ToolTip="Thème clair / sombre"/>
+        </StackPanel>
+      </Grid>
+
+      <ProgressBar x:Name="Busy" Grid.Row="1" Height="4" IsIndeterminate="True" Visibility="Hidden" Margin="0,12,0,0"
+                   Foreground="#0F766E" Background="{DynamicResource LineBrush}" BorderThickness="0"/>
+
+      <!-- Chiffres clés -->
+      <UniformGrid Grid.Row="2" Columns="4" Margin="0,12,0,0">
+        <Border Style="{StaticResource Card}" Margin="0,0,12,0">
+          <StackPanel>
+            <TextBlock Text="Taille analysée" Style="{StaticResource Muted}"/>
+            <TextBlock x:Name="KpiSize" Text="–" Style="{StaticResource KpiValue}"/>
+          </StackPanel>
+        </Border>
+        <Border Style="{StaticResource Card}" Margin="0,0,12,0">
+          <StackPanel>
+            <TextBlock Text="Fichiers" Style="{StaticResource Muted}"/>
+            <TextBlock x:Name="KpiFiles" Text="–" Style="{StaticResource KpiValue}"/>
+          </StackPanel>
+        </Border>
+        <Border Style="{StaticResource Card}" Margin="0,0,12,0">
+          <StackPanel>
+            <TextBlock Text="Dossiers" Style="{StaticResource Muted}"/>
+            <TextBlock x:Name="KpiDirs" Text="–" Style="{StaticResource KpiValue}"/>
+          </StackPanel>
+        </Border>
+        <Border Style="{StaticResource Card}">
+          <StackPanel>
+            <TextBlock x:Name="KpiDriveLabel" Text="Espace libre" Style="{StaticResource Muted}"/>
+            <TextBlock x:Name="KpiFree" Text="–" Style="{StaticResource KpiValue}"/>
+            <Grid Height="6" Margin="0,8,0,0">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="DriveUsedCol" Width="0*"/>
+                <ColumnDefinition x:Name="DriveFreeCol" Width="1*"/>
+              </Grid.ColumnDefinitions>
+              <Border Grid.ColumnSpan="2" CornerRadius="3" Background="{DynamicResource LineBrush}"/>
+              <Border x:Name="DriveUsedBar" CornerRadius="3" Background="#14B8A6"/>
+            </Grid>
+            <TextBlock x:Name="KpiDriveInfo" Style="{StaticResource Muted}" FontSize="12" Margin="0,6,0,0"/>
+          </StackPanel>
+        </Border>
+      </UniformGrid>
+
+      <!-- Arbre des dossiers -->
+      <Border Grid.Row="3" Style="{StaticResource Card}" Padding="0" Margin="0,14,0,0">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+          <DockPanel Margin="16,12,12,10">
+            <Button x:Name="BtnCollapse" DockPanel.Dock="Right" Content="Tout replier" Style="{StaticResource BtnSmall}" IsEnabled="False"/>
+            <TextBlock Text="Contenu" Style="{StaticResource SectionTitle}" VerticalAlignment="Center"/>
+            <TextBlock Style="{StaticResource Muted}" FontSize="12" Margin="12,1,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                       Text="Double-clic pour déplier · clic droit pour ouvrir, supprimer ou désinstaller"/>
+          </DockPanel>
+
+          <DataGrid x:Name="Tree" Grid.Row="1" Margin="1,0,1,10">
+            <DataGrid.Columns>
+              <DataGridTemplateColumn Header="Nom" Width="3*">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <StackPanel Orientation="Horizontal" Margin="{Binding Indent}" VerticalAlignment="Center">
+                      <Button Tag="chevron" Style="{StaticResource BtnChevron}" Visibility="{Binding ChevronVisibility}">
+                        <Path Data="M0,0 L4.5,4.5 L0,9" Stroke="{DynamicResource MutedBrush}" StrokeThickness="1.7"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                              Width="6" Height="10" Stretch="None" RenderTransformOrigin="0.5,0.5">
+                          <Path.RenderTransform><RotateTransform Angle="{Binding ChevronAngle}"/></Path.RenderTransform>
+                        </Path>
+                      </Button>
+                      <Grid Width="16" Height="16" Margin="6,0,10,0" Visibility="{Binding IconVisibility}">
+                        <Path Data="M1.5,3.5 C1.5,2.7 2.2,2 3,2 L6.2,2 L7.7,3.5 L13,3.5 C13.8,3.5 14.5,4.2 14.5,5 L14.5,12 C14.5,12.8 13.8,13.5 13,13.5 L3,13.5 C2.2,13.5 1.5,12.8 1.5,12 Z"
+                              Fill="{DynamicResource FolderBrush}" Stretch="None" Visibility="{Binding FolderVisibility}"/>
+                        <Path Data="M4,1.5 L9.5,1.5 L13,5 L13,14.5 L4,14.5 Z M9.5,1.5 L9.5,5 L13,5" Stroke="{DynamicResource MutedBrush}"
+                              StrokeThickness="1.3" StrokeLineJoin="Round" Stretch="None" Visibility="{Binding FileVisibility}"/>
+                      </Grid>
+                      <TextBlock Text="{Binding Name}" FontWeight="{Binding NameWeight}" Opacity="{Binding NameOpacity}"
+                                 VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                      <Border Background="#FEE2E2" CornerRadius="9" Padding="7,1" Margin="10,0,0,0" VerticalAlignment="Center"
+                              Visibility="{Binding DeniedVisibility}">
+                        <TextBlock Text="accès refusé" Foreground="#B91C1C" FontSize="11" FontWeight="SemiBold"/>
+                      </Border>
+                    </StackPanel>
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+
+              <DataGridTemplateColumn Header="Taille" Width="0.9*">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding SizeText}" FontWeight="SemiBold" Margin="14,0" VerticalAlignment="Center"/>
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+
+              <DataGridTemplateColumn Header="% du dossier parent" Width="1.5*">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <Grid Margin="14,0" VerticalAlignment="Center">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="58"/>
+                      </Grid.ColumnDefinitions>
+                      <Grid Height="8" VerticalAlignment="Center">
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="{Binding BarFill}"/>
+                          <ColumnDefinition Width="{Binding BarRest}"/>
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.ColumnSpan="2" CornerRadius="4" Background="{DynamicResource LineBrush}"/>
+                        <Border CornerRadius="4" Background="{Binding BarBrush}"/>
+                      </Grid>
+                      <TextBlock Grid.Column="1" Text="{Binding PercentText}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                 Foreground="{DynamicResource MutedBrush}"/>
+                    </Grid>
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+
+              <DataGridTemplateColumn Header="Fichiers" Width="0.9*">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding FilesText}" Foreground="{DynamicResource MutedBrush}" Margin="14,0" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"/>
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+            </DataGrid.Columns>
+          </DataGrid>
+
+          <!-- Écran vide, avant le premier scan -->
+          <StackPanel x:Name="EmptyState" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,0,40">
+            <Viewbox Width="64" Height="64" HorizontalAlignment="Center" Opacity="0.9">
+              <Canvas Width="256" Height="256">
+                <Rectangle Canvas.Left="8" Canvas.Top="8" Width="240" Height="240" RadiusX="56" RadiusY="56" Fill="{DynamicResource ChipBrush}"/>
+                <Rectangle Canvas.Left="56" Canvas.Top="56" Width="84" Height="144" RadiusX="12" RadiusY="12" Fill="#14B8A6"/>
+                <Rectangle Canvas.Left="150" Canvas.Top="56" Width="50" Height="70" RadiusX="12" RadiusY="12" Fill="#5EEAD4"/>
+                <Rectangle Canvas.Left="150" Canvas.Top="136" Width="50" Height="30" RadiusX="9" RadiusY="9" Fill="#99F6E4"/>
+                <Rectangle Canvas.Left="150" Canvas.Top="174" Width="50" Height="26" RadiusX="9" RadiusY="9" Fill="#CCFBF1"/>
+              </Canvas>
+            </Viewbox>
+            <TextBlock x:Name="EmptyTitle" Text="Aucune analyse pour l'instant" FontSize="16" FontWeight="SemiBold" Margin="0,16,0,0" HorizontalAlignment="Center"/>
+            <TextBlock x:Name="EmptyText" Style="{StaticResource Muted}" Margin="0,4,0,0" HorizontalAlignment="Center" TextAlignment="Center"
+                       Text="Clique sur un lecteur à gauche, ou sur « Choisir un dossier… »."/>
+          </StackPanel>
+        </Grid>
+      </Border>
+    </Grid>
+  </Grid>
+</Window>

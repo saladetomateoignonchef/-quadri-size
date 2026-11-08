@@ -4,18 +4,26 @@ rem Rien a installer. Resultat : bin\QuadriSize.exe
 setlocal
 cd /d "%~dp0"
 
-set "CSC=%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
-if not exist "%CSC%" set "CSC=%WINDIR%\Microsoft.NET\Framework\v4.0.30319\csc.exe"
-if not exist "%CSC%" (
+set "NET=%WINDIR%\Microsoft.NET\Framework64\v4.0.30319"
+if not exist "%NET%\csc.exe" set "NET=%WINDIR%\Microsoft.NET\Framework\v4.0.30319"
+if not exist "%NET%\csc.exe" (
     echo Compilateur C# introuvable : il faut le .NET Framework 4.
     exit /b 1
 )
+set "CSC=%NET%\csc.exe"
 
 if not exist bin mkdir bin
 
+rem Interface WPF : les fichiers XAML de src\ui sont integres a l'executable.
 "%CSC%" /nologo /codepage:65001 /target:winexe /optimize+ /out:bin\QuadriSize.exe ^
     /win32manifest:src\app.manifest ^
-    /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:Microsoft.VisualBasic.dll src\*.cs
+    /lib:"%NET%\WPF" ^
+    /r:PresentationFramework.dll /r:PresentationCore.dll /r:WindowsBase.dll /r:System.Xaml.dll ^
+    /r:System.Windows.Forms.dll /r:Microsoft.VisualBasic.dll ^
+    /resource:src\ui\Theme.xaml,QuadriSize.ui.Theme.xaml ^
+    /resource:src\ui\MainWindow.xaml,QuadriSize.ui.MainWindow.xaml ^
+    /resource:src\ui\Dialog.xaml,QuadriSize.ui.Dialog.xaml ^
+    src\*.cs
 if errorlevel 1 exit /b 1
 
 if /i "%~1"=="test" (

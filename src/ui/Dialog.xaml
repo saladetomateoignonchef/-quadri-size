@@ -1,0 +1,44 @@
+<!-- Fenêtre de message aux couleurs de Quadri-Size (même modèle que Driver).
+     Remplace les boîtes de dialogue grises de Windows. -->
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="500" SizeToContent="Height" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        ResizeMode="NoResize" ShowInTaskbar="False" WindowStartupLocation="CenterOwner"
+        FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="13" UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display">
+  <Grid Margin="18">
+    <!-- Ombre sur un cadre à part : un effet appliqué au cadre du texte rendrait le texte flou -->
+    <Border CornerRadius="14" Background="{DynamicResource SurfaceBrush}">
+      <Border.Effect>
+        <DropShadowEffect BlurRadius="24" ShadowDepth="4" Opacity="0.28" Color="#0B1F33"/>
+      </Border.Effect>
+    </Border>
+    <Border CornerRadius="14" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1">
+      <DockPanel Margin="24,22,24,20">
+        <!-- En-tête : pastille + titre (on peut déplacer la fenêtre en le tirant) -->
+        <DockPanel DockPanel.Dock="Top" x:Name="DlgHeader" Background="Transparent">
+          <Border x:Name="DlgIcon" Width="38" Height="38" CornerRadius="19" Background="#CCFBF1" DockPanel.Dock="Left">
+            <TextBlock x:Name="DlgGlyph" Text="i" FontSize="19" FontWeight="Bold" Foreground="#0F766E"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+          <TextBlock x:Name="DlgTitle" FontSize="17" FontWeight="SemiBold" Margin="14,0,0,0"
+                     VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextBrush}"/>
+        </DockPanel>
+        <!-- Boutons -->
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+          <Button x:Name="BtnDlgSecondary" Style="{StaticResource BtnBase}" MinWidth="96" Margin="0,0,8,0" IsCancel="True"/>
+          <Button x:Name="BtnDlgPrimary" Style="{StaticResource BtnPrimary}" MinWidth="96"/>
+        </StackPanel>
+        <!-- Détail (chemin, taille…) dans une puce grise -->
+        <Border x:Name="DlgDetailBox" DockPanel.Dock="Bottom" Margin="52,12,0,0" Background="{DynamicResource ChipBrush}"
+                CornerRadius="8" Padding="12,9" Visibility="Collapsed">
+          <TextBlock x:Name="DlgDetail" TextWrapping="Wrap" FontSize="12" LineHeight="18" Foreground="{DynamicResource ChipTextBrush}"/>
+        </Border>
+        <!-- Texte -->
+        <ScrollViewer Margin="52,10,0,0" MaxHeight="380" VerticalScrollBarVisibility="Auto">
+          <TextBlock x:Name="DlgText" TextWrapping="Wrap" LineHeight="20" Foreground="{DynamicResource MutedBrush}"/>
+        </ScrollViewer>
+      </DockPanel>
+    </Border>
+  </Grid>
+</Window>

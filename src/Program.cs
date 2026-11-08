@@ -1,5 +1,6 @@
 using System;
-using System.Windows.Forms;
+using System.Windows;
+using System.Windows.Threading;
 
 namespace QuadriSize
 {
@@ -10,9 +11,14 @@ namespace QuadriSize
         {
             // Les droits administrateur et la netteté à haute résolution sont demandés
             // dans app.manifest, intégré à l'exécutable par build.bat.
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new MainForm());
+            var ui = new MainUi();
+            Application.Current.DispatcherUnhandledException += (object sender, DispatcherUnhandledExceptionEventArgs e) =>
+            {
+                Dialogs.Show(ui.Window, DialogKind.Error, "Erreur inattendue",
+                    "Quelque chose s'est mal passé. Tu peux continuer à utiliser Quadri-Size.", e.Exception.Message);
+                e.Handled = true;
+            };
+            Application.Current.Run(ui.Window);
         }
     }
 }
