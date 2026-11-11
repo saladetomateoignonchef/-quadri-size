@@ -68,6 +68,23 @@ namespace QuadriSize.Tests
                 Check("total après rescan", node.Size, 3600L);
                 Check("dossiers après rescan", node.DirCount, 4L);
 
+                // Arbre large : le scan lit plusieurs dossiers en même temps, les totaux doivent rester exacts.
+                string wide = Path.Combine(root, "large");
+                for (int i = 0; i < 12; i++)
+                    for (int j = 0; j < 12; j++)
+                    {
+                        Write(wide, Path.Combine("d" + i, "s" + j, "a.bin"), 10);
+                        Write(wide, Path.Combine("d" + i, "s" + j, "b.bin"), 20);
+                    }
+                Write(wide, "x.bin", 7);
+                var wideScanner = new Scanner();
+                DirNode wideNode = wideScanner.Scan(wide);
+                Check("large : taille", wideNode.Size, 144L * 30 + 7);
+                Check("large : fichiers", wideNode.FileCount, 289L);
+                Check("large : dossiers", wideNode.DirCount, 12L + 144L);
+                Check("large : fichiers comptés", wideScanner.FilesScanned, 289L);
+                Check("large : taille de d3", wideNode.Dirs.Single(d => d.Name == "d3").Size, 12L * 30);
+
                 CheckSplit("\"C:\\Program Files\\App\\unins000.exe\" /SILENT", @"C:\Program Files\App\unins000.exe", "/SILENT");
                 CheckSplit("MsiExec.exe /X{1234-ABCD}", "MsiExec.exe", "/X{1234-ABCD}");
                 CheckSplit(@"C:\Program Files\App\uninstall.exe --remove", @"C:\Program Files\App\uninstall.exe", "--remove");

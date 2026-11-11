@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Security;
 using System.Threading;
 
@@ -88,6 +89,12 @@ namespace QuadriSize
     /// Parcourt un dossier récursivement et calcule la taille de chaque sous-dossier.
     /// Les liens (jonctions, liens symboliques) ne sont pas suivis, pour éviter
     /// de compter deux fois les mêmes fichiers ou de tourner en boucle.
+    ///
+    /// Pour aller vite, plusieurs dossiers sont lus en même temps (un petit groupe de threads
+    /// se partage une pile de dossiers à lire) et, sous Windows, la liste des fichiers est
+    /// demandée directement à l'API FindFirstFileEx, qui est bien plus rapide que DirectoryInfo.
+    /// Chaque thread ne remplit que le dossier qu'il lit ; les totaux (taille, nombre de
+    /// fichiers) sont additionnés à la fin, d'un seul coup, du bas vers le haut de l'arbre.
     /// </summary>
     public sealed class Scanner
     {
@@ -115,9 +122,26 @@ namespace QuadriSize
         public DirNode Scan(string path, DirNode parent)
         {
             var dir = new DirectoryInfo(path);
-            var node = new DirNode(parent == null ? DisplayName(dir) : dir.Name, dir.FullName, parent);
-            ScanInto(dir, node);
-            return node;
+            var root = new DirNode(parent == null ? DisplayName(dir) : dir.Name, dir.FullName, parent);
+
+            var run = new ScanRun();
+            run.Pending.Push(root);
+
+            int threads = Math.Max(4, Math.Min(12, Environment.ProcessorCount * 2));
+            var helpers = new List<Thread>();
+            for (int i = 1; i < threads; i++)
+            {
+                var thread = new Thread(() => Work(run));
+                thread.IsBackground = true;
+                thread.Start();
+                helpers.Add(thread);
+            }
+            Work(run); // le thread appelant travaille aussi
+            foreach (var thread in helpers) thread.Join();
+
+            if (run.Failure != null) throw run.Failure;
+            AddUpTotals(root);
+            return root;
         }
 
         private static string DisplayName(DirectoryInfo di)
@@ -126,21 +150,99 @@ namespace QuadriSize
             return string.IsNullOrEmpty(di.Name) ? di.FullName : di.Name;
         }
 
-        private void ScanInto(DirectoryInfo dir, DirNode node)
+        /// <summary>État partagé par les threads pendant un scan.</summary>
+        private sealed class ScanRun
+        {
+            public readonly object Lock = new object();
+            public readonly Stack<DirNode> Pending = new Stack<DirNode>();
+            public int Active;          // nombre de threads en train de lire un dossier
+            public Exception Failure;   // première erreur imprévue
+        }
+
+        /// <summary>Boucle d'un thread : prend un dossier à lire, le lit, et met ses sous-dossiers à la file.</summary>
+        private void Work(ScanRun run)
+        {
+            var children = new List<DirNode>();
+            while (true)
+            {
+                DirNode node;
+                lock (run.Lock)
+                {
+                    while (run.Pending.Count == 0)
+                    {
+                        if (run.Active == 0 || run.Failure != null)
+                        {
+                            Monitor.PulseAll(run.Lock); // réveille les autres : c'est fini
+                            return;
+                        }
+                        Monitor.Wait(run.Lock);
+                    }
+                    if (run.Failure != null)
+                    {
+                        Monitor.PulseAll(run.Lock);
+                        return;
+                    }
+                    node = run.Pending.Pop();
+                    run.Active++;
+                }
+
+                children.Clear();
+                Exception error = null;
+                try { ReadDirectory(node, children); }
+                catch (Exception ex) { error = ex; }
+
+                lock (run.Lock)
+                {
+                    if (error != null && run.Failure == null) run.Failure = error;
+                    foreach (var child in children) run.Pending.Push(child);
+                    run.Active--;
+                    Monitor.PulseAll(run.Lock);
+                }
+            }
+        }
+
+        /// <summary>Lit le contenu d'un seul dossier : remplit ses fichiers et crée ses sous-dossiers (à lire ensuite).</summary>
+        private void ReadDirectory(DirNode node, List<DirNode> children)
         {
             if (_cancel) return;
-            _currentPath = dir.FullName;
+            _currentPath = node.FullPath;
 
-            var subDirs = new List<DirectoryInfo>();
+            if (NativeAvailable)
+            {
+                try
+                {
+                    ReadDirectoryNative(node, children);
+                    return;
+                }
+                catch (DllNotFoundException) { NativeBroken = true; }
+                catch (EntryPointNotFoundException) { NativeBroken = true; }
+                // Les fichiers déjà lus avant l'erreur sont refaits proprement par la méthode de secours.
+                node.Files.Clear();
+                node.Dirs.Clear();
+                children.Clear();
+                node.Size = 0;
+                node.FileCount = 0;
+            }
+            ReadDirectoryManaged(node, children);
+        }
+
+        /// <summary>Méthode de secours (et hors Windows) : DirectoryInfo, plus lente.</summary>
+        private void ReadDirectoryManaged(DirNode node, List<DirNode> children)
+        {
+            long count = 0;
             try
             {
-                foreach (var entry in dir.EnumerateFileSystemInfos())
+                foreach (var entry in new DirectoryInfo(node.FullPath).EnumerateFileSystemInfos())
                 {
                     var asDir = entry as DirectoryInfo;
                     if (asDir != null)
                     {
                         if ((entry.Attributes & FileAttributes.ReparsePoint) == 0)
-                            subDirs.Add(asDir);
+                        {
+                            var child = new DirNode(asDir.Name, asDir.FullName, node);
+                            node.Dirs.Add(child);
+                            children.Add(child);
+                        }
                         continue;
                     }
 
@@ -149,7 +251,7 @@ namespace QuadriSize
                     node.Files.Add(new FileEntry(file.Name, len));
                     node.Size += len;
                     node.FileCount++;
-                    Interlocked.Increment(ref _filesScanned);
+                    count++;
                 }
             }
             catch (Exception ex)
@@ -158,16 +260,86 @@ namespace QuadriSize
                 node.Denied = true;
                 Interlocked.Increment(ref _deniedCount);
             }
+            Interlocked.Add(ref _filesScanned, count);
+        }
 
-            foreach (var sub in subDirs)
+        /// <summary>Windows : FindFirstFileEx sans noms courts 8.3 et avec de gros paquets, bien plus rapide.</summary>
+        private void ReadDirectoryNative(DirNode node, List<DirNode> children)
+        {
+            WIN32_FIND_DATA data;
+            IntPtr handle = FindFirstFileEx(SearchPattern(node.FullPath), FindExInfoBasic, out data,
+                FindExSearchNameMatch, IntPtr.Zero, FIND_FIRST_EX_LARGE_FETCH);
+            if (handle == InvalidHandle)
             {
-                if (_cancel) return;
-                var child = new DirNode(sub.Name, sub.FullName, node);
-                ScanInto(sub, child);
-                node.Dirs.Add(child);
-                node.Size += child.Size;
-                node.FileCount += child.FileCount;
-                node.DirCount += 1 + child.DirCount;
+                // Accès refusé, dossier disparu, nom invalide… : comme avant, le dossier est « inaccessible ».
+                node.Denied = true;
+                Interlocked.Increment(ref _deniedCount);
+                return;
+            }
+
+            long count = 0;
+            try
+            {
+                do
+                {
+                    string name = data.cFileName;
+                    if (name == "." || name == "..") continue;
+
+                    if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+                    {
+                        // Jonctions et liens symboliques : ignorés.
+                        if ((data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0)
+                        {
+                            var child = new DirNode(name, Path.Combine(node.FullPath, name), node);
+                            node.Dirs.Add(child);
+                            children.Add(child);
+                        }
+                    }
+                    else
+                    {
+                        long len = ((long)data.nFileSizeHigh << 32) | data.nFileSizeLow;
+                        node.Files.Add(new FileEntry(name, len));
+                        node.Size += len;
+                        node.FileCount++;
+                        count++;
+                    }
+                }
+                while (FindNextFile(handle, out data));
+
+                if (Marshal.GetLastWin32Error() != ERROR_NO_MORE_FILES)
+                {
+                    node.Denied = true; // la lecture s'est arrêtée sur une erreur
+                    Interlocked.Increment(ref _deniedCount);
+                }
+            }
+            finally
+            {
+                FindClose(handle);
+                Interlocked.Add(ref _filesScanned, count);
+            }
+        }
+
+        /// <summary>Additionne les totaux du bas vers le haut : chaque dossier s'ajoute à son parent.</summary>
+        private static void AddUpTotals(DirNode root)
+        {
+            // Parcours « parent avant enfants » ; en le lisant à l'envers, les enfants passent avant leur parent.
+            var order = new List<DirNode>();
+            var stack = new Stack<DirNode>();
+            stack.Push(root);
+            while (stack.Count > 0)
+            {
+                var node = stack.Pop();
+                order.Add(node);
+                foreach (var child in node.Dirs) stack.Push(child);
+            }
+
+            for (int i = order.Count - 1; i > 0; i--)
+            {
+                var node = order[i];
+                var parent = node.Parent;
+                parent.Size += node.Size;
+                parent.FileCount += node.FileCount;
+                parent.DirCount += 1 + node.DirCount;
             }
         }
 
@@ -177,6 +349,60 @@ namespace QuadriSize
                 || ex is SecurityException
                 || ex is IOException; // inclut PathTooLongException et DirectoryNotFoundException
         }
+
+        // ---------------------------------------------------------------- API Windows
+
+        private static volatile bool NativeBroken;
+
+        private static bool NativeAvailable
+        {
+            get { return !NativeBroken && Environment.OSVersion.Platform == PlatformID.Win32NT; }
+        }
+
+        private static readonly IntPtr InvalidHandle = new IntPtr(-1);
+        private const int FindExInfoBasic = 1;          // pas de nom court 8.3
+        private const int FindExSearchNameMatch = 0;
+        private const int FIND_FIRST_EX_LARGE_FETCH = 2; // gros paquets de résultats
+        private const uint FILE_ATTRIBUTE_DIRECTORY = 0x10;
+        private const uint FILE_ATTRIBUTE_REPARSE_POINT = 0x400;
+        private const int ERROR_NO_MORE_FILES = 18;
+
+        /// <summary>« C:\dossier » devient « C:\dossier\* » ; les très longs chemins prennent le préfixe \\?\.</summary>
+        private static string SearchPattern(string directory)
+        {
+            string path = directory.TrimEnd('\\') + "\\*";
+            if (path.Length < 248 || path.StartsWith(@"\\?\")) return path;
+            return path.StartsWith(@"\\") ? @"\\?\UNC\" + path.Substring(2) : @"\\?\" + path;
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct WIN32_FIND_DATA
+        {
+            public uint dwFileAttributes;
+            public System.Runtime.InteropServices.ComTypes.FILETIME ftCreationTime;
+            public System.Runtime.InteropServices.ComTypes.FILETIME ftLastAccessTime;
+            public System.Runtime.InteropServices.ComTypes.FILETIME ftLastWriteTime;
+            public uint nFileSizeHigh;
+            public uint nFileSizeLow;
+            public uint dwReserved0;
+            public uint dwReserved1;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+            public string cFileName;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 14)]
+            public string cAlternateFileName;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr FindFirstFileEx(string fileName, int infoLevel, out WIN32_FIND_DATA data,
+            int searchOp, IntPtr searchFilter, int additionalFlags);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool FindNextFile(IntPtr handle, out WIN32_FIND_DATA data);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool FindClose(IntPtr handle);
     }
 
     public static class Format

@@ -73,7 +73,10 @@ analysé lui-même.
 
 ## Fonctionnement
 
-- `src/Scanner.cs` parcourt l'arborescence dans un thread séparé et additionne les tailles.
+- `src/Scanner.cs` parcourt l'arborescence en lisant plusieurs dossiers en même temps (un petit
+  groupe de threads, 4 à 12 selon le processeur) et, sous Windows, avec l'API `FindFirstFileEx`
+  (sans noms courts 8.3, par gros paquets), beaucoup plus rapide que `DirectoryInfo` (gardé comme
+  méthode de secours). Les tailles sont additionnées à la fin, du bas vers le haut de l'arbre.
   Les jonctions et liens symboliques ne sont pas suivis, pour ne pas compter deux fois les
   mêmes fichiers.
 - `src/Programs.cs` lit la liste des programmes installés dans le registre (la même que
