@@ -425,6 +425,7 @@ namespace QuadriSize
 
         private void Expand(RowItem row)
         {
+            if (row.IsSummary) { ShowMore(row); return; }
             if (!row.CanExpand || row.IsExpanded) return;
             DirNode dir = row.Item.Dir;
 
@@ -441,18 +442,38 @@ namespace QuadriSize
                 .ThenBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase)
                 .ToList();
 
-            int index = _rows.IndexOf(row) + 1;
-            foreach (var child in sorted.Take(MaxItemsPerFolder))
-                _rows.Insert(index++, new RowItem(child, row.Depth + 1));
-
-            if (sorted.Count > MaxItemsPerFolder)
-            {
-                var rest = sorted.Skip(MaxItemsPerFolder).ToList();
-                long restSize = rest.Sum(c => c.Size);
-                _rows.Insert(index, new RowItem(row.Depth + 1, "… et " + rest.Count.ToString("N0") + " autres éléments",
-                    restSize, Format.Percent(restSize, dir.Size)));
-            }
+            InsertChildren(_rows.IndexOf(row) + 1, row.Depth + 1, sorted, dir);
             row.IsExpanded = true;
+        }
+
+        /// <summary>
+        /// Insère les 500 premiers éléments de la liste, puis une ligne « … et N autres éléments »
+        /// sur laquelle on peut cliquer deux fois pour afficher la suite : aucun fichier n'est caché
+        /// (un fichier vide, de 0 octet, arrive en toute fin de liste).
+        /// </summary>
+        private void InsertChildren(int index, int depth, List<ItemInfo> items, DirNode dir)
+        {
+            foreach (var child in items.Take(MaxItemsPerFolder))
+                _rows.Insert(index++, new RowItem(child, depth));
+
+            if (items.Count > MaxItemsPerFolder)
+            {
+                var rest = items.Skip(MaxItemsPerFolder).ToList();
+                long restSize = rest.Sum(c => c.Size);
+                _rows.Insert(index, new RowItem(depth,
+                    "… et " + rest.Count.ToString("N0") + " autres éléments (double-clic pour afficher la suite)",
+                    restSize, Format.Percent(restSize, dir.Size), rest, dir));
+            }
+        }
+
+        /// <summary>Remplace la ligne « … et N autres éléments » par les éléments suivants.</summary>
+        private void ShowMore(RowItem summary)
+        {
+            int index = _rows.IndexOf(summary);
+            if (index < 0) return;
+            _rows.RemoveAt(index);
+            InsertChildren(index, summary.Depth, summary.Remaining, summary.SummaryDir);
+            if (index < _rows.Count) _tree.SelectedItem = _rows[index];
         }
 
         private void Collapse(RowItem row)
@@ -467,7 +488,9 @@ namespace QuadriSize
         private void Toggle(RowItem row)
         {
             if (row == null || _busy) return;
-            if (row.IsExpanded) Collapse(row); else Expand(row);
+            if (row.IsSummary) ShowMore(row);
+            else if (row.IsExpanded) Collapse(row);
+            else Expand(row);
         }
 
         private void CollapseAll()

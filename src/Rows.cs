@@ -46,12 +46,20 @@ namespace QuadriSize
             Depth = depth;
         }
 
-        internal RowItem(int depth, string text, long size, double percent)
+        /// <summary>Éléments que la ligne « … et N autres éléments » cache encore (ligne de résumé seulement).</summary>
+        internal readonly System.Collections.Generic.List<ItemInfo> Remaining;
+        /// <summary>Dossier auquel appartiennent ces éléments (ligne de résumé seulement).</summary>
+        internal readonly DirNode SummaryDir;
+
+        internal RowItem(int depth, string text, long size, double percent,
+            System.Collections.Generic.List<ItemInfo> remaining, DirNode dir)
         {
             Depth = depth;
             _summaryText = text;
             _summarySize = size;
             _summaryPercent = percent;
+            Remaining = remaining;
+            SummaryDir = dir;
         }
 
         private static Brush Frozen(byte r, byte g, byte b)

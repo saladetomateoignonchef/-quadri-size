@@ -13,7 +13,9 @@ Aucune installation nécessaire : le compilateur C# du .NET Framework 4 est four
 build.bat
 ```
 
-L'application est créée dans `bin\QuadriSize.exe`. Pour compiler et lancer aussi les tests :
+L'application est créée dans `bin\QuadriSize.exe`, avec son icône, et `build.bat` crée aussi
+un raccourci **Quadri-Size** sur le bureau (`raccourci.ps1`, relancé à chaque compilation, donc
+aussi après « maj git »). Pour compiler et lancer aussi les tests :
 
 ```bat
 build.bat test
@@ -31,7 +33,10 @@ ouverture. C'est ce qui lui permet de voir tous les dossiers.
    l'espace libre du lecteur.
 3. Déplie les dossiers avec la flèche, un double-clic ou les flèches du clavier (→ / ←).
    Ils sont triés du plus gros au plus petit. Les barres turquoise sont des dossiers, les
-   grises des fichiers. **Tout replier** revient au premier niveau.
+   grises des fichiers. **Tout replier** revient au premier niveau. Quand un dossier contient
+   plus de 500 éléments, les 500 plus gros s'affichent puis une ligne « … et N autres éléments » :
+   double-clic (ou Entrée) dessus pour afficher la suite. Les fichiers vides (0 octet) sont tout
+   en bas de la liste, ils sont donc toujours dans cette dernière partie.
 4. L'interrupteur soleil / lune passe du thème clair au thème sombre (le choix est retenu).
 
 ### Mettre l'appli à jour : bouton « maj git »
@@ -85,5 +90,7 @@ analysé lui-même.
 - `src/Updater.cs` fait la mise à jour du bouton « maj git ». Comme Windows interdit d'écraser
   un programme en cours d'exécution, l'exécutable actuel est d'abord renommé en
   `QuadriSize.old.exe`, supprimé au démarrage suivant.
+- `assets/quadri-size.ico` est l'icône de l'appli (le même logo que dans le menu de gauche :
+  carré bleu nuit, bordure turquoise, quatre blocs). `build.bat` l'intègre à l'exécutable.
 - `src/app.manifest` demande les droits administrateur au lancement.
 - La taille affichée est la taille réelle des fichiers, pas la place occupée sur le disque.

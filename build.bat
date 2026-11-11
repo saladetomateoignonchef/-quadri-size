@@ -17,6 +17,7 @@ if not exist bin mkdir bin
 rem Interface WPF : les fichiers XAML de src\ui sont integres a l'executable.
 "%CSC%" /nologo /codepage:65001 /target:winexe /optimize+ /out:bin\QuadriSize.exe ^
     /win32manifest:src\app.manifest ^
+    /win32icon:assets\quadri-size.ico ^
     /lib:"%NET%\WPF" ^
     /r:PresentationFramework.dll /r:PresentationCore.dll /r:WindowsBase.dll /r:System.Xaml.dll ^
     /r:System.Windows.Forms.dll /r:Microsoft.VisualBasic.dll ^
@@ -31,5 +32,8 @@ if /i "%~1"=="test" (
         src\Scanner.cs src\Programs.cs tests\ScanTest.cs || exit /b 1
     bin\ScanTest.exe || exit /b 1
 )
+
+rem Raccourci "Quadri-Size" sur le bureau (avec l'icone). Une erreur ici ne fait pas echouer la compilation.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0raccourci.ps1" || echo Raccourci du bureau non cree.
 
 echo OK : bin\QuadriSize.exe
